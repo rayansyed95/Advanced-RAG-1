@@ -1,0 +1,21 @@
+Advanced RAG
+
+    1. Knowledge Base Upgrade
+        - Persistant Knowledge Base
+        - Chroma DB
+        - Hybrid Search (KW + Semantic)
+        - Query Transformation (Improved query using LLM)
+        - Re-ranking (Next Steps) 
+
+    System Architecture 
+    ===================
+
+    User Query -> 
+        Query Transformation -> 
+                Hybrid Search -> 
+                    Semantic Search (Embeddings)
+                    Keyword Search (BM25 / TF - IDF)
+                        Merge -> 
+                            (Re-ranking) -> 
+                                Context Builder
+                                    LLM -> Response

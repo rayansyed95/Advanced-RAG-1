@@ -1,0 +1,8 @@
+chromadb
+streamlit
+openai
+sentence-transformers
+python-dotenv
+PyPDF2
+scikit-learn
+numpy
