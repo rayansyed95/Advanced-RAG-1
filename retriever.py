@@ -1,100 +1,178 @@
+from pathlib import Path
+
 import chromadb
+import numpy as np
 from sentence_transformers import SentenceTransformer
 from sentence_transformers import CrossEncoder
 from sklearn.feature_extraction.text import TfidfVectorizer
-import numpy as np
+
 from query_transform import rewrite_query
 
 # -------------------
 # Config
-# ------------------
+# -------------------
 
-CHROMA_PATH = "chroma_db"
+BASE_DIR = Path(__file__).resolve().parent
+
+CHROMA_PATH = str(BASE_DIR / "chroma_db")
 COLLECTION_NAME = "rag_collection"
+
 EMBEDDING_MODEL = SentenceTransformer("all-MiniLM-L6-v2")
 reranker = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2")
 
-# ---------
+# -------------------
 # Load ChromaDB
-# -------------
+# -------------------
+
+print("=" * 50)
+print("Loading ChromaDB")
+print("Chroma Path:", CHROMA_PATH)
+print("=" * 50)
 
 client = chromadb.PersistentClient(path=CHROMA_PATH)
-collection = client.get_or_create_collection(name=COLLECTION_NAME)
 
+collection = client.get_or_create_collection(
+    name=COLLECTION_NAME
+)
+
+# -------------------
 # Load Documents
-# ---------------
+# -------------------
 
-# Get total count to avoid the default 100 limit
 count = collection.count()
-data = collection.get(limit=count)
-documents = data['documents']
-ids = data['ids']
 
-# Vectorizer Config.
-# ================
+print("Collection:", COLLECTION_NAME)
+print("Collection Count:", count)
+
+documents = []
+ids = []
+
+if count > 0:
+    data = collection.get(limit=count)
+
+    documents = data.get("documents", [])
+    ids = data.get("ids", [])
+
+    # Remove empty documents
+    documents = [
+        doc.strip()
+        for doc in documents
+        if doc and isinstance(doc, str) and doc.strip()
+    ]
+
+print("Documents Loaded:", len(documents))
+
+if len(documents) > 0:
+    print("First Document Preview:")
+    print(documents[0][:300])
+
+# -------------------
+# TF-IDF Setup
+# -------------------
 
 vectorizer = TfidfVectorizer(
     lowercase=True,
-    stop_words='english',
-    ngram_range=(1, 2),   # captures bigrams
-    max_df=0.85,           # ignore very common terms
+    stop_words="english",
+    ngram_range=(1, 2),
+    max_df=0.85,
     min_df=1
 )
-tfidf_matrix = vectorizer.fit_transform(documents)
+
+tfidf_matrix = None
+
+if documents:
+    try:
+        tfidf_matrix = vectorizer.fit_transform(documents)
+        print("TF-IDF Matrix Shape:", tfidf_matrix.shape)
+    except Exception as e:
+        print("TF-IDF Error:", e)
+else:
+    print("WARNING: No documents found for TF-IDF indexing.")
+
+print("=" * 50)
 
 # -------------------
 # Semantic Search
 # -------------------
 
-# def semantic_search(query, top_k=3):
-#     query_embedding = EMBEDDING_MODEL.encode([query]).tolist()
-#     results = collection.query(
-#         query_embeddings=query_embedding,
-#         n_results=top_k
-#     )
-#     return results["documents"][0]
-
 
 def semantic_search(query, top_k=3):
-    query_embedding = EMBEDDING_MODEL.encode([query]).tolist()
+
+    if collection.count() == 0:
+        return []
+
+    query_embedding = EMBEDDING_MODEL.encode(
+        [query]
+    ).tolist()
+
     results = collection.query(
         query_embeddings=query_embedding,
-        n_results=top_k
+        n_results=min(top_k, collection.count())
     )
+
     docs = results["documents"][0]
     distances = results["distances"][0]
+
     return list(zip(docs, distances))
 
+# -------------------
+# Keyword Search
+# -------------------
 
-# ----------------
-# Keyword Seach
-# ---------------
+
 def keyword_search(query, top_k=3):
-    query_vec = vectorizer.transform([query])
-    scores = (query_vec * tfidf_matrix.T).toarray()[0]
 
-    # If no keywords match, return empty list instead of arbitrary documents
+    if tfidf_matrix is None:
+        return []
+
+    query_vec = vectorizer.transform([query])
+
+    scores = (
+        query_vec * tfidf_matrix.T
+    ).toarray()[0]
+
+    if len(scores) == 0:
+        return []
+
     if np.max(scores) == 0:
         return []
 
     top_indices = np.argsort(scores)[::-1][:top_k]
+
     return [documents[i] for i in top_indices]
 
-
-# ------------
+# -------------------
 # Re-ranker
-# ------------
+# -------------------
+
 
 def rerank_results(query, results, top_k=5):
-    pairs = [(query, doc) for doc in results]
+
+    if not results:
+        return []
+
+    pairs = [
+        (query, doc)
+        for doc in results
+    ]
+
     scores = reranker.predict(pairs)
-    ranked = sorted(zip(results, scores), key=lambda x: x[1], reverse=True)
-    return [doc for doc, _ in ranked[:top_k]]
 
+    ranked = sorted(
+        zip(results, scores),
+        key=lambda x: x[1],
+        reverse=True
+    )
 
-# --------------------
+    return [
+        doc
+        for doc, _
+        in ranked[:top_k]
+    ]
+
+# -------------------
 # Hybrid Search
-# --------------------
+# -------------------
 
 # def hybrid_search(query, top_k=5):
 #     rewritten_query = rewrite_query(query)
@@ -105,24 +183,49 @@ def rerank_results(query, results, top_k=5):
 
 
 def hybrid_search(query, top_k=5, k=60):
+
     rewritten_query = rewrite_query(query)
 
-    semantic_results = semantic_search(rewritten_query, top_k=top_k*2)
-    keyword_results = keyword_search(query, top_k=top_k*2)
+    semantic_results = semantic_search(
+        rewritten_query,
+        top_k=top_k * 2
+    )
 
-    # ── Unpack (doc, distance) tuples from semantic_search ──────────────
-    semantic_docs = [doc for doc, distance in semantic_results]
-    semantic_distances = [distance for doc, distance in semantic_results]
-    # ─────────────────────────────────────────────────────────────────────
+    keyword_results = keyword_search(
+        rewritten_query,
+        top_k=top_k * 2
+    )
+
+    semantic_docs = [
+        doc
+        for doc, distance in semantic_results
+    ]
+
+    scores = {}
 
     # Reciprocal Rank Fusion
-    scores = {}
-    for rank, doc in enumerate(semantic_docs):          # ← was: semantic_results
-        scores[doc] = scores.get(doc, 0) + 1 / (k + rank)
-    for rank, doc in enumerate(keyword_results):
-        scores[doc] = scores.get(doc, 0) + 1 / (k + rank)
+    for rank, doc in enumerate(semantic_docs):
+        scores[doc] = (
+            scores.get(doc, 0)
+            + 1 / (k + rank)
+        )
 
-    ranked = sorted(scores.items(), key=lambda x: x[1], reverse=True)
-    combined = [doc for doc, _ in ranked[:top_k]]
+    for rank, doc in enumerate(keyword_results):
+        scores[doc] = (
+            scores.get(doc, 0)
+            + 1 / (k + rank)
+        )
+
+    ranked = sorted(
+        scores.items(),
+        key=lambda x: x[1],
+        reverse=True
+    )
+
+    combined = [
+        doc
+        for doc, _
+        in ranked[:top_k]
+    ]
 
     return combined, rewritten_query
