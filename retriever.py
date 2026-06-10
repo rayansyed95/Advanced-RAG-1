@@ -19,7 +19,7 @@ reranker = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2")
 # -------------
 
 client = chromadb.PersistentClient(path=CHROMA_PATH)
-collection = client.get_collection(name=COLLECTION_NAME)
+collection = client.get_or_create_collection(name=COLLECTION_NAME)
 
 # Load Documents
 # ---------------
@@ -54,6 +54,7 @@ tfidf_matrix = vectorizer.fit_transform(documents)
 #     )
 #     return results["documents"][0]
 
+
 def semantic_search(query, top_k=3):
     query_embedding = EMBEDDING_MODEL.encode([query]).tolist()
     results = collection.query(
@@ -71,11 +72,11 @@ def semantic_search(query, top_k=3):
 def keyword_search(query, top_k=3):
     query_vec = vectorizer.transform([query])
     scores = (query_vec * tfidf_matrix.T).toarray()[0]
-    
+
     # If no keywords match, return empty list instead of arbitrary documents
     if np.max(scores) == 0:
         return []
-        
+
     top_indices = np.argsort(scores)[::-1][:top_k]
     return [documents[i] for i in top_indices]
 
@@ -105,10 +106,10 @@ def rerank_results(query, results, top_k=5):
 
 def hybrid_search(query, top_k=5, k=60):
     rewritten_query = rewrite_query(query)
-    
+
     semantic_results = semantic_search(rewritten_query, top_k=top_k*2)
     keyword_results = keyword_search(query, top_k=top_k*2)
-    
+
     # ── Unpack (doc, distance) tuples from semantic_search ──────────────
     semantic_docs = [doc for doc, distance in semantic_results]
     semantic_distances = [distance for doc, distance in semantic_results]
@@ -120,10 +121,8 @@ def hybrid_search(query, top_k=5, k=60):
         scores[doc] = scores.get(doc, 0) + 1 / (k + rank)
     for rank, doc in enumerate(keyword_results):
         scores[doc] = scores.get(doc, 0) + 1 / (k + rank)
-    
+
     ranked = sorted(scores.items(), key=lambda x: x[1], reverse=True)
     combined = [doc for doc, _ in ranked[:top_k]]
-    
-    return combined, rewritten_query
 
-    
+    return combined, rewritten_query
