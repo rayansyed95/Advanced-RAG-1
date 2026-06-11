@@ -42,6 +42,11 @@ graph TD
   - Chat history tracking with last-3-turn conversational context.
   - **Collapsible Technical details** under each response showing the rewritten query and raw retrieved chunks for debugging.
   - Session question budget manager (capped at 10 requests per session to control OpenAI token consumption, with easy reset).
+- **📂 User Document Upload & Session Isolation**:
+  - Allows uploading custom `.pdf` or `.txt` files directly through the UI.
+  - Dynamically processes, chunks, embeds, and indexes the uploaded document into a session-specific Chroma collection.
+  - Provides a toggle to switch seamlessly between the **Default Database** and the **Uploaded Document** as the active knowledge source.
+  - Keeps collections completely isolated across users using unique session IDs, preventing data leakage, and automatically cleaning up on session reset.
 
 ---
 
@@ -105,8 +110,8 @@ OPENAI_API_KEY=your-openai-api-key-here
 
 ## 🚀 How to Run
 
-### Step 1: Build the Knowledge Base
-Ensure your source PDF is placed at `data/Rag-database.pdf`. Then, run the knowledge base creation script to extract, chunk, embed, and store the documents in ChromaDB:
+### Step 1 (Optional): Build the Default Knowledge Base
+If you want to use the default knowledge base, ensure your source PDF is placed at `data/Rag-database.pdf`. Then, run the build script to extract, chunk, embed, and index it into ChromaDB:
 ```bash
 python build_kb.py
 ```
@@ -116,4 +121,6 @@ Launch the web interface:
 ```bash
 streamlit run app.py
 ```
-A browser tab will automatically open at `http://localhost:8501`. You can begin asking queries relative to the PDF database!
+A browser tab will automatically open at `http://localhost:8501`. 
+
+You can ask queries about the default database or toggle to **Upload Document** in the sidebar to upload and query your own files (`.pdf` or `.txt`) dynamically!
