@@ -117,6 +117,7 @@ python build_kb.py
 ```
 
 ### Step 2: Run the Streamlit Application
+
 Launch the web interface:
 ```bash
 streamlit run app.py
